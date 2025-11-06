@@ -1,10 +1,11 @@
-﻿using System;
+﻿using Microsoft.Data.Sqlite;
+using SSD_Assignment___Banking_Application;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Data.Sqlite;
 
 namespace Banking_Application
 {
@@ -68,54 +69,97 @@ namespace Banking_Application
         public void loadBankAccounts()
         {
             if (!File.Exists(Data_Access_Layer.databaseName))
-                initialiseDatabase();
-            else
             {
+                initialiseDatabase();
+                return;
+            }
 
-                using (var connection = getDatabaseConnection())
+            using (var connection = getDatabaseConnection())
+            {
+                connection.Open();
+                var command = connection.CreateCommand();
+                command.CommandText = "SELECT * FROM Bank_Accounts";
+                SqliteDataReader dr = command.ExecuteReader();
+
+                while (dr.Read())
                 {
-                    connection.Open();
-                    var command = connection.CreateCommand();
-                    command.CommandText = "SELECT * FROM Bank_Accounts";
-                    SqliteDataReader dr = command.ExecuteReader();
-                    
-                    while(dr.Read())
+                    int accountType = dr.GetInt16(7);
+
+                    //Common account fields
+                    string accountNo = dr.GetString(0);
+
+                    //Decrypt sensitive fields 
+                    string name, addr1, addr2, addr3, town;
+
+                    try
                     {
+                        name = Crypto.DecryptToString(
+                            (byte[])dr["Name_ct"],
+                            (byte[])dr["Name_nonce"],
+                            (byte[])dr["Name_tag"]);
 
-                        int accountType = dr.GetInt16(7);
+                        addr1 = Crypto.DecryptToString(
+                            (byte[])dr["Address1_ct"],
+                            (byte[])dr["Address1_nonce"],
+                            (byte[])dr["Address1_tag"]);
 
-                        if(accountType == Account_Type.Current_Account)
-                        {
-                            Current_Account ca = new Current_Account();
-                            ca.accountNo = dr.GetString(0);
-                            ca.name = dr.GetString(1);
-                            ca.address_line_1 = dr.GetString(2);
-                            ca.address_line_2 = dr.GetString(3);
-                            ca.address_line_3 = dr.GetString(4);
-                            ca.town = dr.GetString(5);
-                            ca.balance = dr.GetDouble(6);
-                            ca.overdraftAmount = dr.GetDouble(8);
-                            accounts.Add(ca);
-                        }
-                        else
-                        {
-                            Savings_Account sa = new Savings_Account();
-                            sa.accountNo = dr.GetString(0);
-                            sa.name = dr.GetString(1);
-                            sa.address_line_1 = dr.GetString(2);
-                            sa.address_line_2 = dr.GetString(3);
-                            sa.address_line_3 = dr.GetString(4);
-                            sa.town = dr.GetString(5);
-                            sa.balance = dr.GetDouble(6);
-                            sa.interestRate = dr.GetDouble(9);
-                            accounts.Add(sa);
-                        }
+                        addr2 = Crypto.DecryptToString(
+                            (byte[])dr["Address2_ct"],
+                            (byte[])dr["Address2_nonce"],
+                            (byte[])dr["Address2_tag"]);
 
+                        addr3 = Crypto.DecryptToString(
+                            (byte[])dr["Address3_ct"],
+                            (byte[])dr["Address3_nonce"],
+                            (byte[])dr["Address3_tag"]);
 
+                        town = Crypto.DecryptToString(
+                            (byte[])dr["Town_ct"],
+                            (byte[])dr["Town_nonce"],
+                            (byte[])dr["Town_tag"]);
                     }
-
+                    catch
+                    {
+                        // Fallback for old plaintext records
+                        name = dr.IsDBNull(1) ? "" : dr.GetString(1);
+                        addr1 = dr.IsDBNull(2) ? "" : dr.GetString(2);
+                        addr2 = dr.IsDBNull(3) ? "" : dr.GetString(3);
+                        addr3 = dr.IsDBNull(4) ? "" : dr.GetString(4);
+                        town = dr.IsDBNull(5) ? "" : dr.GetString(5);
+                    }
+                    double balance = dr.GetDouble(6);
+                    //recreates correct account type
+                    if (accountType == Account_Type.Current_Account)
+                    {
+                        Current_Account ca = new Current_Account
+                        {
+                            accountNo = accountNo,
+                            name = name,
+                            address_line_1 = addr1,
+                            address_line_2 = addr2,
+                            address_line_3 = addr3,
+                            town = town,
+                            balance = balance,
+                            overdraftAmount = dr.GetDouble(8)
+                        };
+                        accounts.Add(ca);
+                    }
+                    else
+                    {
+                        Savings_Account sa = new Savings_Account
+                        {
+                            accountNo = accountNo,
+                            name = name,
+                            address_line_1 = addr1,
+                            address_line_2 = addr2,
+                            address_line_3 = addr3,
+                            town = town,
+                            balance = balance,
+                            interestRate = dr.GetDouble(9)
+                        };
+                        accounts.Add(sa);
+                    }
                 }
-
             }
         }
 
@@ -128,36 +172,75 @@ namespace Banking_Application
                 ba = (Savings_Account)ba;
 
             accounts.Add(ba);
+            var (nameCt, nameNonce, nameTag) = Crypto.EncryptString(ba.name);
+            var (addr1Ct, addr1Nonce, addr1Tag) = Crypto.EncryptString(ba.address_line_1);
+            var (addr2Ct, addr2Nonce, addr2Tag) = Crypto.EncryptString(ba.address_line_2);
+            var (addr3Ct, addr3Nonce, addr3Tag) = Crypto.EncryptString(ba.address_line_3);
+            var (townCt, townNonce, townTag) = Crypto.EncryptString(ba.town);
+
 
             using (var connection = getDatabaseConnection())
             {
                 connection.Open();
                 var command = connection.CreateCommand();
-                command.CommandText =
-                @"
-                    INSERT INTO Bank_Accounts VALUES(" +
-                    "'" + ba.accountNo + "', " +
-                    "'" + ba.name + "', " +
-                    "'" + ba.address_line_1 + "', " +
-                    "'" + ba.address_line_2 + "', " +
-                    "'" + ba.address_line_3 + "', " +
-                    "'" + ba.town + "', " +
-                    ba.balance + ", " +
-                    (ba.GetType() == typeof(Current_Account) ? 1 : 2) + ", ";
+                command.CommandText = @"
+    INSERT INTO Bank_Accounts
+    (AccountNo, Name,
+     Name_ct, Name_nonce, Name_tag,
+     Address1_ct, Address1_nonce, Address1_tag,
+     Address2_ct, Address2_nonce, Address2_tag,
+     Address3_ct, Address3_nonce, Address3_tag,
+     Town_ct, Town_nonce, Town_tag,
+     Balance, AccountType, Overdraft, InterestRate)
+    VALUES (
+     @acct, @name,
+     @nct, @nnonce, @ntag,
+     @a1ct, @a1nonce, @a1tag,
+     @a2ct, @a2nonce, @a2tag,
+     @a3ct, @a3nonce, @a3tag,
+     @tct, @tnonce, @ttag,
+     @bal, @type, @od, @ir
+    );";
 
-                if (ba.GetType() == typeof(Current_Account))
+
+                command.Parameters.AddWithValue("@acct", ba.accountNo);
+                command.Parameters.AddWithValue("@name", ba.name);
+                command.Parameters.AddWithValue("@nct", nameCt);
+                command.Parameters.AddWithValue("@nnonce", nameNonce);
+                command.Parameters.AddWithValue("@ntag", nameTag);
+
+                command.Parameters.AddWithValue("@a1ct", addr1Ct);
+                command.Parameters.AddWithValue("@a1nonce", addr1Nonce);
+                command.Parameters.AddWithValue("@a1tag", addr1Tag);
+
+                command.Parameters.AddWithValue("@a2ct", addr2Ct);
+                command.Parameters.AddWithValue("@a2nonce", addr2Nonce);
+                command.Parameters.AddWithValue("@a2tag", addr2Tag);
+
+                command.Parameters.AddWithValue("@a3ct", addr3Ct);
+                command.Parameters.AddWithValue("@a3nonce", addr3Nonce);
+                command.Parameters.AddWithValue("@a3tag", addr3Tag);
+
+                command.Parameters.AddWithValue("@tct", townCt);
+                command.Parameters.AddWithValue("@tnonce", townNonce);
+                command.Parameters.AddWithValue("@ttag", townTag);
+
+                command.Parameters.AddWithValue("@bal", ba.balance);
+                command.Parameters.AddWithValue("@type", (ba.GetType() == typeof(Current_Account)) ? 1 : 2);
+
+             if (ba is Current_Account ca)
                 {
-                    Current_Account ca = (Current_Account)ba;
-                    command.CommandText += ca.overdraftAmount + ", NULL)";
+                    command.Parameters.AddWithValue("@od", ca.overdraftAmount);
+                    command.Parameters.AddWithValue("@ir", DBNull.Value);
                 }
 
-                else
+               else if (ba is Savings_Account sa)
                 {
-                    Savings_Account sa = (Savings_Account)ba;
-                    command.CommandText += "NULL," + sa.interestRate + ")";
+                    command.Parameters.AddWithValue("@od", DBNull.Value);
+                    command.Parameters.AddWithValue("@ir", sa.interestRate);
                 }
 
-                command.ExecuteNonQuery();
+                    command.ExecuteNonQuery();
 
             }
 
