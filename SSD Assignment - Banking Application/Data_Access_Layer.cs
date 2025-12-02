@@ -61,7 +61,7 @@ namespace Banking_Application
                     ) WITHOUT ROWID
                 ";
 
-                command.ExecuteNonQuery();
+               
                 
             }
         }
@@ -241,6 +241,14 @@ namespace Banking_Application
                 }
 
                     command.ExecuteNonQuery();
+                command.ExecuteNonQuery();
+                Audit.LogTransaction(
+                    Environment.UserName,
+                    ba.accountNo,
+                    ba.name,
+                    "Account Created",
+                    ba.balance
+                    );
 
             }
 
@@ -285,14 +293,32 @@ namespace Banking_Application
             else
             {
                 accounts.Remove(toRemove);
+                try
+                {
+                    Authz.DemandAdmin();
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Console.WriteLine(ex.Message);
+                    Console.WriteLine("Account closure cancelled.");
+                    return false;
+                }
+
 
                 using (var connection = getDatabaseConnection())
                 {
                     connection.Open();
                     var command = connection.CreateCommand();
                     command.CommandText = "DELETE FROM Bank_Accounts WHERE accountNo = '" + toRemove.accountNo + "'";
+                    command.Parameters.AddWithValue("@accNo", toRemove.accountNo);
                     command.ExecuteNonQuery();
-
+                    Audit.LogTransaction(
+                      Environment.UserName,
+                      toRemove.accountNo,
+                      toRemove.name,
+                      "Account Closed",
+                     0.0
+                    );
                 }
 
                 return true;
@@ -300,7 +326,7 @@ namespace Banking_Application
 
         }
 
-        public bool lodge(String accNo, double amountToLodge)
+        public bool lodge(String accNo, double amountToLodge, string reason=null)
         {
 
             Bank_Account toLodgeTo = null;
@@ -325,9 +351,23 @@ namespace Banking_Application
                 using (var connection = getDatabaseConnection())
                 {
                     connection.Open();
-                    var command = connection.CreateCommand();
-                    command.CommandText = "UPDATE Bank_Accounts SET balance = " + toLodgeTo.balance + " WHERE accountNo = '" + toLodgeTo.accountNo + "'";
-                    command.ExecuteNonQuery();
+                    using(var tx=connection.BeginTransaction())
+                    {
+                        var command = connection.CreateCommand();
+                        command.CommandText = "UPDATE Bank_Accounts SET balance = " + toLodgeTo.balance + " WHERE accountNo = '" + toLodgeTo.accountNo + "'";
+                        command.Parameters.AddWithValue("@bal", toLodgeTo.balance);
+                        command.Parameters.AddWithValue("@accNo", toLodgeTo.accountNo);
+                        command.ExecuteNonQuery();
+                        tx.Commit();
+                    }
+                    Audit.LogTransaction(
+                      Environment.UserName,
+                      toLodgeTo.accountNo,
+                      toLodgeTo.name,
+                      "Lodgement",
+                     amountToLodge,
+                     reason
+                    );
 
                 }
 
@@ -336,7 +376,7 @@ namespace Banking_Application
 
         }
 
-        public bool withdraw(String accNo, double amountToWithdraw)
+        public bool withdraw(String accNo, double amountToWithdraw, string reason=null)
         {
 
             Bank_Account toWithdrawFrom = null;
@@ -362,9 +402,23 @@ namespace Banking_Application
                 using (var connection = getDatabaseConnection())
                 {
                     connection.Open();
-                    var command = connection.CreateCommand();
-                    command.CommandText = "UPDATE Bank_Accounts SET balance = " + toWithdrawFrom.balance + " WHERE accountNo = '" + toWithdrawFrom.accountNo + "'";
-                    command.ExecuteNonQuery();
+                    using (var tx = connection.BeginTransaction())
+                    {
+                        var command = connection.CreateCommand();
+                        command.CommandText = "UPDATE Bank_Accounts SET balance = " + toWithdrawFrom.balance + " WHERE accountNo = '" + toWithdrawFrom.accountNo + "'";
+                        command.Parameters.AddWithValue("@bal", toWithdrawFrom.balance);
+                        command.Parameters.AddWithValue("@accNo", toWithdrawFrom.accountNo);
+                        command.ExecuteNonQuery();
+                        tx.Commit();
+                    }
+                    Audit.LogTransaction(
+                      Environment.UserName,
+                      toWithdrawFrom.accountNo,
+                      toWithdrawFrom.name,
+                      "Withdrawal",
+                     amountToWithdraw,
+                     reason
+                    );
 
                 }
 

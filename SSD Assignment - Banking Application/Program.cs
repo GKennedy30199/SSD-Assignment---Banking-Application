@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SSD_Assignment___Banking_Application;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -8,7 +9,20 @@ namespace Banking_Application
     {
         public static void Main(string[] args)
         {
-            
+
+            try
+            {
+                Authz.DemandTeller();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine(ex.Message);
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+                return;
+            }
+
+
             Data_Access_Layer dal = Data_Access_Layer.getInstance();
             dal.loadBankAccounts();
             bool running = true;
@@ -265,25 +279,25 @@ namespace Banking_Application
 
                             do
                             {
-
                                 if (loopCount > 0)
-                                    Console.WriteLine("INVALID AMOUNT ENTERED - PLEASE TRY AGAIN");
+                                    Console.WriteLine("INVALID AMOUNT ENTERED - PLEASE TRY AGAIN (0 < amount <= 1000000)");
 
                                 Console.WriteLine("Enter Amount To Lodge: ");
                                 String amountToLodgeString = Console.ReadLine();
-
-                                try
+                                if (!double.TryParse(amountToLodgeString, out amountToLodge) ||
+                                      amountToLodge <= 0 ||
+                                      amountToLodge > 1000000)
                                 {
-                                    amountToLodge = Convert.ToDouble(amountToLodgeString);
-                                }
-
-                                catch
-                                {
+                                    amountToLodge = -1;
                                     loopCount++;
                                 }
-
                             } while (amountToLodge < 0);
-
+                            string reason = null;
+                            if (amountToLodge > 10000)
+                            {
+                                Console.WriteLine("Enter Reason For Transaction (Required for amounts > €10,000): ");
+                                reason = Console.ReadLine();
+                            }
                             dal.lodge(accNo, amountToLodge);
                         }
                         break;
@@ -311,18 +325,22 @@ namespace Banking_Application
                                 Console.WriteLine("Enter Amount To Withdraw (€" + ba.getAvailableFunds() + " Available): ");
                                 String amountToWithdrawString = Console.ReadLine();
 
-                                try
+                                if (!double.TryParse(amountToWithdrawString, out amountToWithdraw) ||
+                                amountToWithdraw <= 0 ||
+                                amountToWithdraw > 1000000 ||
+                                amountToWithdraw > ba.getAvailableFunds())
                                 {
-                                    amountToWithdraw = Convert.ToDouble(amountToWithdrawString);
-                                }
-
-                                catch
-                                {
+                                    amountToWithdraw = -1;
                                     loopCount++;
                                 }
 
                             } while (amountToWithdraw < 0);
-
+                            string reason = null;
+                            if (amountToWithdraw > 10000)
+                            {
+                                Console.WriteLine("Enter Reason For Transaction (Required for amounts > €10,000): ");
+                                reason = Console.ReadLine();
+                            }
                             bool withdrawalOK = dal.withdraw(accNo, amountToWithdraw);
 
                             if(withdrawalOK == false)
