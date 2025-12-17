@@ -9,8 +9,8 @@ namespace SSD_Assignment___Banking_Application
 {
     public static class Authz
     {
-        public const string TellersGroup = @"ITSLIGO\Bank Tellers";
-        public const string AdminsGroup = @"ITSLIGO\Bank Teller Administrators";
+        public const string TellersGroup = @"ITSLIGO.LAN\Bank Tellers";
+        public const string AdminsGroup = @"ITSLIGO.LAN\Bank Teller Administrators";
 
 
         public static string CurrentUser()
